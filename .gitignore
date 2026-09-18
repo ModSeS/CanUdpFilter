@@ -373,3 +373,4 @@ cmake_install.cmake
 *.o
 *.obj
 *.exe
+dump.txt
