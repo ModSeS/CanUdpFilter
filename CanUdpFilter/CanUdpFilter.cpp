@@ -9,7 +9,34 @@
 #include <sys/socket.h>
 #include <netdb.h>
 #include <unistd.h>
+#include <signal.h>
 
+volatile sig_atomic_t stopRequested = 0;
+
+void handleSignal(int)
+{
+    stopRequested = 1;
+}
+
+bool setupSignalHandlers()
+{
+    struct sigaction action {};
+
+    action.sa_handler = handleSignal;
+    sigemptyset(&action.sa_mask);
+    action.sa_flags = 0;
+
+    if (sigaction(SIGINT, &action, nullptr) == -1)
+    {
+        return false;
+    }
+
+    if (sigaction(SIGTERM, &action, nullptr) == -1)
+    {
+        return false;
+    }
+    return true;
+}
 
 bool parseHex(const std::string& text, unsigned long& value)
 {
@@ -167,6 +194,11 @@ int main(int argc, char* argv[])
     // Например:
     // CanUdpFilter 127.0.0.1 5000 04 06 07
 
+    if (!setupSignalHandlers()) {
+        perror("sigaction");
+        return 1;
+    }
+
     if (argc < 4)
     {
         std::cerr
@@ -284,8 +316,24 @@ int main(int argc, char* argv[])
 
     std::string line;
 
-    while (std::getline(std::cin, line))
+    while (!stopRequested)
     {
+        if (!std::getline(std::cin, line))
+        {
+            if (stopRequested)
+            {
+                break;
+            }
+
+            if (std::cin.eof())
+            {
+                break;
+            }
+
+            std::cerr << "Ошибка чтения.\n";
+            break;
+        }
+
         unsigned int nodeId = 0;
         bool broadcast = false;
 
@@ -313,6 +361,8 @@ int main(int argc, char* argv[])
 
         if (sent < 0)
         {
+            if (errno == EINTR && stopRequested) break;
+
             perror("sendto");
 
             close(socketFd);
@@ -336,6 +386,11 @@ int main(int argc, char* argv[])
 
     close(socketFd);
     freeaddrinfo(addresses);
+
+    if (stopRequested) {
+        std::cerr
+            << "\nПолучен сигнал завершения. Программа остановлена.";
+    }
 
     return 0;
 }
